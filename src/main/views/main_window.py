@@ -29,9 +29,13 @@ class MainWindow:
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
         file_menu.add_command(label="New", accelerator="Ctrl+N", command=self.controller.new_diagram)
-        file_menu.add_command(label="Open...", accelerator="Ctrl+O", command=self.controller.open_diagram)
+        file_menu.add_separator()
+        file_menu.add_command(label="Load Product...", accelerator="Ctrl+L", command=self.controller.show_product_list)
+        file_menu.add_separator()
         file_menu.add_command(label="Save", accelerator="Ctrl+S", command=self.controller.save_diagram)
-        file_menu.add_command(label="Save As...", accelerator="Ctrl+Shift+S", command=self.controller.save_diagram_as)
+        file_menu.add_separator()
+        file_menu.add_command(label="Export...", command=self.controller.export_diagram_enhanced)
+        file_menu.add_command(label="Import...", command=self.controller.import_diagram_enhanced)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.on_exit)
 
@@ -57,8 +61,8 @@ class MainWindow:
         toolbar.pack(side="top", fill="x")
 
         ttk.Button(toolbar, text="New", width=8, command=self.controller.new_diagram).pack(side="left", padx=2)
-        ttk.Button(toolbar, text="Open", width=8, command=self.controller.open_diagram).pack(side="left", padx=2)
-        ttk.Button(toolbar, text="Save", width=8, command=self.controller.save_diagram).pack(side="left", padx=2)
+        ttk.Button(toolbar, text="Load", width=8, command=self.controller.show_product_list).pack(side="left", padx=2)
+        ttk.Button(toolbar, text="Export", width=8, command=self.controller.export_diagram_enhanced).pack(side="left", padx=2)
 
         ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=5)
 
@@ -120,6 +124,7 @@ class MainWindow:
 
     def _bind_shortcuts(self):
         self.root.bind('<Control-n>', lambda e: self.controller.new_diagram())
+        self.root.bind('<Control-l>', lambda e: self.controller.show_product_list())
         self.root.bind('<Control-o>', lambda e: self.controller.open_diagram())
         self.root.bind('<Control-s>', lambda e: self.controller.save_diagram())
         self.root.bind('<Control-Shift-S>', lambda e: self.controller.save_diagram_as())

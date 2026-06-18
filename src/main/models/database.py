@@ -563,11 +563,27 @@ class DatabaseManager:
         """Update component properties."""
         table_name, row_id = self._decode_component_id(component_id)
         allowed = {'name', 'color_id', 'material_id', 'weight', 'weight_unit', 'node_type'}
-        if table_name in ("intermediate_component", "leaf_component"):
+        if table_name == "root_component":
+            allowed.update({'brand', 'model', 'description'})
+        else:
             allowed.add('root_component_id')
         updates = {k: v for k, v in kwargs.items() if k in allowed}
         if not updates:
             return False
+
+        # Normalize UI values before sending them to SQLite.
+        for fk_field in ('color_id', 'material_id'):
+            if fk_field in updates:
+                value = updates[fk_field]
+                updates[fk_field] = int(value) if str(value).strip() else None
+
+        if 'root_component_id' in updates:
+            value = updates['root_component_id']
+            updates['root_component_id'] = int(value) if str(value).strip() else None
+
+        if 'weight' in updates:
+            value = updates['weight']
+            updates['weight'] = float(value) if str(value).strip() else None
 
         if table_name == "root_component":
             updates["modified_at"] = datetime.now().isoformat()
@@ -1016,11 +1032,11 @@ class DatabaseManager:
             exclude = {'id', 'created_at', 'modified_at'}
         elif kind == "leaf":
             table_name = "leaf_component"
-            exclude = {'id'}
+            exclude = {'id', 'root_component_id'}
         else:
             # Treat "composite" as intermediate in current schema.
             table_name = "intermediate_component"
-            exclude = {'id'}
+            exclude = {'id', 'root_component_id'}
 
         all_columns = self.get_table_schema(table_name)
 
@@ -1067,7 +1083,9 @@ class DatabaseManager:
     def get_step_fields(self) -> List[Dict[str, Any]]:
         """Get editable fields for disassembly_step table."""
         all_columns = self.get_table_schema('disassembly_step')
-        exclude = {'id', 'input_root_component_id', 'input_intermediate_component_id', 'input_leaf_component_id'}
+        # step_order is auto-managed by database, should not be editable
+        exclude = {'id', 'input_root_component_id', 'input_intermediate_component_id', 
+                   'input_leaf_component_id', 'step_order'}
 
         editable_fields = []
         for col in all_columns:

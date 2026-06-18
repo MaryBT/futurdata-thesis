@@ -126,6 +126,8 @@ class DiamondStep(Shape):
         self.text = "Action"
         self.action_id = ""
         self.name = ""
+        self.description = ""
+        self.tool_id = None
         self.tools = ""
 
     def get_bounds(self) -> Tuple[float, float, float, float]:
@@ -149,12 +151,20 @@ class DiamondStep(Shape):
 
     def to_dict(self) -> dict:
         data = super().to_dict()
-        data.update({"action_id": self.action_id, "name": self.name, "tools": self.tools})
+        data.update({
+            "action_id": self.action_id,
+            "name": self.name,
+            "description": self.description,
+            "tool_id": self.tool_id,
+            "tools": self.tools
+        })
         return data
 
     def load_properties(self, data: dict):
         self.action_id = data.get("action_id", "")
         self.name = data.get("name", "")
+        self.description = data.get("description", "")
+        self.tool_id = data.get("tool_id")
         self.tools = data.get("tools", "")
 
 
