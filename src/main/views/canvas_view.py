@@ -81,6 +81,62 @@ class DiagramCanvas(tk.Canvas):
             scrolled = True
 
         return scrolled
+    
+    def scroll_to_shape(self, shape: Shape):
+        """
+        Scroll canvas to make shape visible in viewport.
+        
+        Args:
+            shape: Shape to scroll to
+        """
+        if not shape:
+            return
+        
+        # Get shape position
+        shape_x = shape.x
+        shape_y = shape.y
+        
+        # Get visible area
+        visible_width = self.winfo_width()
+        visible_height = self.winfo_height()
+        
+        if visible_width <= 1 or visible_height <= 1:
+            # Canvas not yet rendered, schedule for later
+            self.after(100, lambda: self.scroll_to_shape(shape))
+            return
+        
+        # Get current scroll position (as fractions 0.0 to 1.0)
+        x_view = self.xview()
+        y_view = self.yview()
+        
+        # Current visible area in canvas coordinates
+        visible_x1 = x_view[0] * self.canvas_width
+        visible_x2 = x_view[1] * self.canvas_width
+        visible_y1 = y_view[0] * self.canvas_height
+        visible_y2 = y_view[1] * self.canvas_height
+        
+        # Check if shape is already fully visible with some margin
+        margin = 100
+        if (visible_x1 + margin < shape_x < visible_x2 - margin and
+            visible_y1 + margin < shape_y < visible_y2 - margin):
+            # Already visible, no need to scroll
+            return
+        
+        # Calculate target scroll position to center the shape
+        target_x = shape_x - (visible_width / 2)
+        target_y = shape_y - (visible_height / 2)
+        
+        # Clamp to valid range
+        target_x = max(0, min(target_x, self.canvas_width - visible_width))
+        target_y = max(0, min(target_y, self.canvas_height - visible_height))
+        
+        # Convert to fractions
+        x_fraction = target_x / self.canvas_width if self.canvas_width > 0 else 0
+        y_fraction = target_y / self.canvas_height if self.canvas_height > 0 else 0
+        
+        # Scroll to position
+        self.xview_moveto(x_fraction)
+        self.yview_moveto(y_fraction)
 
     def update_scroll_region_from_shapes(self, shapes) -> None:
         """Update scroll region to encompass all shapes with padding."""
@@ -134,7 +190,8 @@ class DiagramCanvas(tk.Canvas):
             x1, y1, x2, y2, fill=self.ACTION_FILL, outline=border_color, width=border_width, tags="shape"
         )
         shape.text_id = self.create_text(
-            shape.x, shape.y, text=shape.text, font=("Arial", 9), fill="black", tags="shape_text"
+            shape.x, shape.y, text=shape.text, font=("Arial", 9), fill="black", 
+            width=75, tags="shape_text"
         )
 
     def _draw_diamond_step(self, shape: DiamondStep):
@@ -151,7 +208,8 @@ class DiagramCanvas(tk.Canvas):
             points, fill=self.DIAMOND_FILL, outline=border_color, width=border_width, tags="shape"
         )
         shape.text_id = self.create_text(
-            shape.x, shape.y, text=shape.text, font=("Arial", 8), fill="black", tags="shape_text"
+            shape.x, shape.y, text=shape.text, font=("Arial", 8), fill="black", 
+            width=65, tags="shape_text"
         )
 
     def _draw_component_box(self, shape: ComponentBox):
@@ -162,7 +220,8 @@ class DiagramCanvas(tk.Canvas):
             x1, y1, x2, y2, fill=self.COMPONENT_FILL, outline=border_color, width=border_width, tags="shape"
         )
         shape.text_id = self.create_text(
-            shape.x, shape.y, text=shape.text, font=("Arial", 9), fill="black", tags="shape_text"
+            shape.x, shape.y, text=shape.text, font=("Arial", 9), fill="black", 
+            width=145, tags="shape_text"
         )
 
     def _draw_arrow_shape(self, shape: ArrowShape):

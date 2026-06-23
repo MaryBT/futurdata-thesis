@@ -7,11 +7,14 @@ from ..models import Diagram, ActionCircle, DiamondStep, ComponentBox, ArrowShap
 from ..models.database import get_database
 from ..views.add_color_dialog import AddColorDialog
 from ..views.add_material_dialog import AddMaterialDialog
+from ..views.add_tool_dialog import AddToolDialog
 from ..utils import (
     CommandHistory, AddShapeCommand, RemoveShapeCommand, MoveShapeCommand,
     AddConnectionCommand, EditShapePropertiesCommand, snap_to_grid,
     find_alignment_guides, DiagramSerializer
 )
+from ..utils.diagram_loader import DiagramLoader
+from ..utils.json_exporter import EnhancedJSONExporter
 
 
 class AppController:
@@ -21,6 +24,9 @@ class AppController:
         self.command_history = CommandHistory()
         self.view = None
         self.db = get_database()
+        self.diagram_loader = DiagramLoader(self.db)
+        self.json_exporter = EnhancedJSONExporter(self.db)
+        self.current_product_id = None  # Track currently loaded product
         self.selected_shape = None
         self.dragging = False
         self.drag_start = None
@@ -92,7 +98,9 @@ class AppController:
             self.arrow_mode = False
             self.connect_mode = False
             self.connecting_from = None
+            self.view.canvas.config(cursor="")
             self.view.set_status("Cancelled")
+            self.view.root.after(1500, lambda: self.view.set_status("Ready"))
 
     def on_canvas_click(self, event):
         x = self.view.canvas.canvasx(event.x)
@@ -165,17 +173,17 @@ class AppController:
 
         # Scroll right
         if mouse_x > visible_width - margin:
-            canvas.xview_scroll(3, "units")
+            canvas.xview_scroll(1, "units")
         # Scroll left
         elif mouse_x < margin:
-            canvas.xview_scroll(-3, "units")
+            canvas.xview_scroll(-1, "units")
 
         # Scroll down
         if mouse_y > visible_height - margin:
-            canvas.yview_scroll(3, "units")
+            canvas.yview_scroll(1, "units")
         # Scroll up
         elif mouse_y < margin:
-            canvas.yview_scroll(-3, "units")
+            canvas.yview_scroll(-1, "units")
 
     def on_canvas_release(self, event):
         if self.dragging and self.drag_shapes and self.drag_initial_positions:
@@ -224,8 +232,6 @@ class AppController:
         menu.add_separator()
         menu.add_command(label="Duplicate", command=lambda: self._duplicate_shape(shape))
         menu.add_command(label="Delete", command=lambda: self._delete_shape(shape))
-        menu.add_separator()
-        menu.add_command(label="Connect to...", command=lambda: self._start_connection_from(shape))
         menu.post(event.x_root, event.y_root)
 
     def _handle_arrow_connection_click(self, shape):
@@ -247,12 +253,14 @@ class AppController:
                 self.view.set_status("Cancelled - same shape.")
             self.connecting_from = None
             self.arrow_mode = False
+            self.view.canvas.config(cursor="")
+            self.view.root.after(2000, lambda: self.view.set_status("Ready"))
             self._update_view()
 
     def _handle_connection_click(self, shape):
         if self.connecting_from is None:
             self.connecting_from = shape
-            self.view.set_status(f"Connection started from {shape.shape_type}. Click target shape.")
+            self.view.set_status(f"Connection started from {shape.shape_type}. Click target shape or press ESC to cancel.")
         else:
             self._clear_preview_line()
             if self.connecting_from != shape:
@@ -262,6 +270,7 @@ class AppController:
                 self.view.set_status("Cancelled - same shape.")
             self.connecting_from = None
             self.connect_mode = False
+            self.view.root.after(2000, lambda: self.view.set_status("Ready"))
 
     def _create_arrow_connection(self, from_shape, to_shape):
         arrow = ArrowShape(0, 0, from_shape, to_shape)
@@ -562,10 +571,11 @@ class AppController:
         if shape_type == "arrow":
             self.arrow_mode = True
             self.connecting_from = None
-            self.view.set_status("Arrow mode: Click on a shape to start")
+            self.view.canvas.config(cursor="crosshair")
+            self.view.set_status("⚡ ARROW MODE: Click source shape, then target shape (Press ESC to cancel)")
             return
 
-        x, y = 700, 400
+        x, y = self._get_next_shape_position()
         shape = self._create_shape_instance(shape_type, x, y)
 
         # Handle specialized component types
@@ -589,6 +599,45 @@ class AppController:
         self.command_history.execute(command)
         self.diagram.select_shape(shape, multi_select=False)
         self._update_view()
+
+    def _get_next_shape_position(self) -> Tuple[float, float]:
+        """
+        Return a position for new shape in visible viewport area.
+        Tries to place shapes in visible area, staggers if multiple shapes added.
+        """
+        # Get current viewport (visible area)
+        x_view = self.view.canvas.xview()
+        y_view = self.view.canvas.yview()
+        
+        canvas_width = self.view.canvas.canvas_width
+        canvas_height = self.view.canvas.canvas_height
+        visible_width = self.view.canvas.winfo_width()
+        visible_height = self.view.canvas.winfo_height()
+        
+        # If canvas not rendered yet, use default
+        if visible_width <= 1 or visible_height <= 1:
+            base_x, base_y = 700, 400
+            index = len(self.diagram.shapes)
+            col = index % 4
+            row = index // 4
+            return base_x + (col * 220), base_y + (row * 140)
+        
+        # Calculate visible area in canvas coordinates
+        visible_x1 = x_view[0] * canvas_width
+        visible_y1 = y_view[0] * canvas_height
+        
+        # Place shape in center of visible area with stagger
+        center_x = visible_x1 + (visible_width / 2)
+        center_y = visible_y1 + (visible_height / 2)
+        
+        # Add stagger based on recent shapes (last 10)
+        recent_shapes = self.diagram.shapes[-10:]
+        stagger_offset = len(recent_shapes) % 5
+        
+        x = center_x + (stagger_offset * 50)
+        y = center_y + (stagger_offset * 40)
+        
+        return x, y
 
     def _create_shape_instance(self, shape_type: str, x: float, y: float):
         if shape_type == "action":
@@ -641,15 +690,71 @@ class AppController:
         self.connecting_from = None
 
         if self.connect_mode:
-            self.view.set_status("Connection mode: Click source shape, then target shape")
+            self.view.set_status("⚡ CONNECTION MODE ACTIVE: Click source shape, then target shape (Press C or ESC to exit)")
+            self.view.canvas.config(cursor="crosshair")
         else:
             self.view.set_status("Connection mode disabled")
+            self.view.canvas.config(cursor="")
+            self.view.root.after(1500, lambda: self.view.set_status("Ready"))
 
     def apply_properties(self, shape, old_properties, new_properties):
         command = EditShapePropertiesCommand(shape, old_properties, new_properties)
         self.command_history.execute(command)
+        self._persist_shape_properties(shape)
+        self.diagram.select_shape(shape, multi_select=False)
         self._update_view()
         self.view.set_status("Properties updated")
+
+    def _persist_diagram_to_db(self):
+        """Flush current in-memory shapes to DB before file save/export."""
+        roots = []
+        others = []
+        for shape in self.diagram.shapes:
+            if isinstance(shape, ComponentBox) and str(shape.properties.get("node_type", "")).strip().lower() == "root":
+                roots.append(shape)
+            else:
+                others.append(shape)
+
+        for shape in roots + others:
+            try:
+                self._persist_shape_properties(shape)
+            except Exception:
+                # Keep file save resilient; DB sync for relationships is handled separately.
+                continue
+
+    def _persist_shape_properties(self, shape):
+        """Persist edited shape properties to the backing database when possible."""
+        if isinstance(shape, ComponentBox):
+            component_id = self._ensure_component_db_id(shape)
+            updates = dict(shape.properties)
+            updates.pop("db_id", None)
+            self.db.update_component(int(component_id), **updates)
+            shape.properties["db_id"] = int(component_id)
+            return
+
+        if isinstance(shape, ActionCircle):
+            try:
+                step_id = self._ensure_step_db_id(shape)
+            except ValueError:
+                return
+            self.db.update_step(
+                int(step_id),
+                title=str(shape.text or "").strip(),
+                description=str(shape.step_description or "").strip(),
+                image_path=str(shape.image_path or "").strip(),
+            )
+            shape.db_step_id = int(step_id)
+            return
+
+        if isinstance(shape, DiamondStep):
+            action_id = self._ensure_action_db_id(shape)
+            self.db.update_action(
+                int(action_id),
+                name=str(shape.name or shape.text or "").strip(),
+                description=str(shape.description or "").strip(),
+                tool_id=shape.tool_id or None,
+            )
+            shape.db_action_id = int(action_id)
 
     def undo(self):
         if self.command_history.undo():
@@ -689,14 +794,16 @@ class AppController:
         self.view.set_status("Reset zoom (not yet implemented)")
 
     def new_diagram(self):
+        """Create a new diagram. Existing database entries are preserved."""
         if not self.check_unsaved_changes():
             return
         self.diagram.clear()
         self.command_history.clear()
+        self.current_product_id = None
         # Reset canvas to minimum size
         self.view.canvas.update_scroll_region_from_shapes([])
         self._update_view()
-        self.view.set_status("New diagram created")
+        self.view.set_status("New diagram created (Database preserved - use 'Load Product' to see saved diagrams)")
 
     def open_diagram(self):
         if not self.check_unsaved_changes():
@@ -718,28 +825,45 @@ class AppController:
             self.view.show_error("Error", "Failed to open file")
 
     def save_diagram(self):
-        if self.diagram.file_path is None:
-            return self.save_diagram_as()
-
-        if DiagramSerializer.save_to_file(self.diagram, self.diagram.file_path):
-            self.view.set_status(f"Saved: {os.path.basename(self.diagram.file_path)}")
+        """Save diagram to database only. Use Export for JSON."""
+        try:
+            # Save to database
+            self._persist_diagram_to_db()
+            
+            # Get product name for status message
+            product_name = "Diagram"
+            if self.current_product_id:
+                product = self.db.get_product(self.current_product_id)
+                if product:
+                    product_name = product.get('name', 'Diagram')
+            
+            self.view.set_status(f"💾 Saved to database: {product_name}")
             return True
-        else:
-            self.view.show_error("Error", "Failed to save file")
+        except Exception as e:
+            self.view.show_error("Save Error", f"Failed to save to database: {e}")
             return False
 
     def save_diagram_as(self):
+        """
+        Legacy JSON save function (for backward compatibility).
+        Prefer using save_diagram() for DB and export_diagram_enhanced() for JSON.
+        """
         file_path = self.view.ask_file_path(save=True)
         if not file_path:
             return False
 
         self.diagram.file_path = file_path
 
-        if DiagramSerializer.save_to_file(self.diagram, file_path):
-            self.view.set_status(f"Saved as: {os.path.basename(file_path)}")
-            return True
-        else:
-            self.view.show_error("Error", "Failed to save file")
+        try:
+            # Save to JSON file (legacy format)
+            if DiagramSerializer.save_to_file(self.diagram, file_path):
+                self.view.set_status(f"💾 Saved JSON: {os.path.basename(file_path)} (Legacy format)")
+                return True
+            else:
+                self.view.show_error("Error", "Failed to save file")
+                return False
+        except Exception as e:
+            self.view.show_error("Save Error", f"Failed to save: {e}")
             return False
 
     def clear_canvas(self):
@@ -787,12 +911,129 @@ class AppController:
         self.view.refresh_properties_panel()
         self.view.set_status(f"Added new material: {name}")
 
+    def show_add_tool_dialog(self):
+        AddToolDialog(self.view.root, self)
+
+    def add_new_tool(self, name, category):
+        self.db.create_tool(name, category)
+        self.view.refresh_properties_panel()
+        self.view.set_status(f"Added new tool: {name}")
+
     def _update_view(self):
         self.view.canvas.redraw_all(self.diagram)
 
         if len(self.diagram.selected_shapes) == 1:
-            self.view.update_properties_panel(self.diagram.selected_shapes[0])
+            selected_shape = self.diagram.selected_shapes[0]
+            self.view.update_properties_panel(selected_shape)
+            # Auto-scroll to show selected shape
+            self.view.canvas.scroll_to_shape(selected_shape)
         else:
             self.view.update_properties_panel(None)
 
         self.view.update_ui_state()
+    
+    # ==================== NEW: PRODUCT LIST & LOAD ====================
+    
+    def show_product_list(self):
+        """Show product list dialog to load a saved diagram."""
+        from ..views.product_list_dialog import ProductListDialog
+        ProductListDialog(self.view.root, self.db, self.load_product_diagram)
+    
+    def load_product_diagram(self, product_id: int):
+        """
+        Load complete diagram for a product from database.
+        
+        Args:
+            product_id: Root component ID to load
+        """
+        if not self.check_unsaved_changes():
+            return
+        
+        try:
+            # Load diagram from database
+            diagram = self.diagram_loader.load_product_diagram(product_id)
+            
+            if diagram:
+                self.diagram = diagram
+                self.current_product_id = product_id
+                self.command_history.clear()
+                
+                # Update canvas scroll region to fit loaded shapes
+                self.view.canvas.update_scroll_region_from_shapes(self.diagram.shapes)
+                self._update_view()
+                
+                # Get product info for status
+                product = self.db.get_product(product_id)
+                product_name = product.get('name', 'Product') if product else 'Product'
+                self.view.set_status(f"Loaded: {product_name} (ID: {product_id})")
+            else:
+                self.view.show_error("Error", f"Failed to load product diagram (ID: {product_id})")
+                
+        except Exception as e:
+            self.view.show_error("Error", f"Failed to load diagram: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def export_diagram_enhanced(self):
+        """Export diagram with full database information."""
+        file_path = self.view.ask_file_path(save=True)
+        if not file_path:
+            return
+        
+        # Ensure .json extension
+        if not file_path.endswith('.json'):
+            file_path += '.json'
+        
+        try:
+            self._persist_diagram_to_db()
+            success = self.json_exporter.export_diagram(
+                self.diagram, 
+                file_path, 
+                self.current_product_id
+            )
+            
+            if success:
+                self.view.set_status(f"Exported: {os.path.basename(file_path)}")
+            else:
+                self.view.show_error("Error", "Failed to export diagram")
+                
+        except Exception as e:
+            self.view.show_error("Error", f"Export failed: {e}")
+    
+    def import_diagram_enhanced(self):
+        """Import diagram from JSON and sync to database."""
+        if not self.check_unsaved_changes():
+            return
+        
+        file_path = self.view.ask_file_path(save=False)
+        if not file_path:
+            return
+        
+        try:
+            diagram = self.json_exporter.import_diagram(file_path, create_in_db=True)
+            
+            if diagram:
+                self.diagram = diagram
+                self.command_history.clear()
+                
+                # Sync to database
+                self._persist_diagram_to_db()
+                
+                # Find and set current product ID
+                for shape in self.diagram.shapes:
+                    if isinstance(shape, ComponentBox):
+                        if shape.properties.get('node_type') == 'Root':
+                            self.current_product_id = shape.properties.get('db_id')
+                            break
+                
+                # Update canvas scroll region
+                self.view.canvas.update_scroll_region_from_shapes(self.diagram.shapes)
+                self._update_view()
+                self.view.set_status(f"Imported: {os.path.basename(file_path)}")
+            else:
+                self.view.show_error("Error", "Failed to import diagram")
+                
+        except Exception as e:
+            self.view.show_error("Error", f"Import failed: {e}")
+            import traceback
+            traceback.print_exc()

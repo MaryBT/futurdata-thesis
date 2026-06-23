@@ -29,9 +29,13 @@ class MainWindow:
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
         file_menu.add_command(label="New", accelerator="Ctrl+N", command=self.controller.new_diagram)
-        file_menu.add_command(label="Open...", accelerator="Ctrl+O", command=self.controller.open_diagram)
+        file_menu.add_separator()
+        file_menu.add_command(label="Load Product...", accelerator="Ctrl+L", command=self.controller.show_product_list)
+        file_menu.add_separator()
         file_menu.add_command(label="Save", accelerator="Ctrl+S", command=self.controller.save_diagram)
-        file_menu.add_command(label="Save As...", accelerator="Ctrl+Shift+S", command=self.controller.save_diagram_as)
+        file_menu.add_separator()
+        file_menu.add_command(label="Export...", command=self.controller.export_diagram_enhanced)
+        file_menu.add_command(label="Import...", command=self.controller.import_diagram_enhanced)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.on_exit)
 
@@ -45,6 +49,7 @@ class MainWindow:
         edit_menu.add_separator()
         edit_menu.add_command(label="Add Color...", command=self.controller.show_add_color_dialog)
         edit_menu.add_command(label="Add Material...", command=self.controller.show_add_material_dialog)
+        edit_menu.add_command(label="Add Tool...", command=self.controller.show_add_tool_dialog)
         edit_menu.add_separator()
         edit_menu.add_command(label="Clear Canvas", command=self.controller.clear_canvas)
 
@@ -57,8 +62,8 @@ class MainWindow:
         toolbar.pack(side="top", fill="x")
 
         ttk.Button(toolbar, text="New", width=8, command=self.controller.new_diagram).pack(side="left", padx=2)
-        ttk.Button(toolbar, text="Open", width=8, command=self.controller.open_diagram).pack(side="left", padx=2)
-        ttk.Button(toolbar, text="Save", width=8, command=self.controller.save_diagram).pack(side="left", padx=2)
+        ttk.Button(toolbar, text="Load", width=8, command=self.controller.show_product_list).pack(side="left", padx=2)
+        ttk.Button(toolbar, text="Export", width=8, command=self.controller.export_diagram_enhanced).pack(side="left", padx=2)
 
         ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=5)
 
@@ -120,19 +125,45 @@ class MainWindow:
 
     def _bind_shortcuts(self):
         self.root.bind('<Control-n>', lambda e: self.controller.new_diagram())
+        self.root.bind('<Control-l>', lambda e: self.controller.show_product_list())
         self.root.bind('<Control-o>', lambda e: self.controller.open_diagram())
         self.root.bind('<Control-s>', lambda e: self.controller.save_diagram())
         self.root.bind('<Control-Shift-S>', lambda e: self.controller.save_diagram_as())
         self.root.bind('<Control-z>', lambda e: self.controller.undo())
         self.root.bind('<Control-y>', lambda e: self.controller.redo())
         self.root.bind('<Delete>', lambda e: self.controller.delete_selected())
-        self.root.bind('<Control-a>', lambda e: self.controller.select_all())
         self.root.bind('<Control-plus>', lambda e: self.controller.zoom_in())
         self.root.bind('<Control-minus>', lambda e: self.controller.zoom_out())
         self.root.bind('<Control-0>', lambda e: self.controller.reset_zoom())
-        self.root.bind('c', lambda e: self.controller.toggle_connect_mode())
         self.root.bind('<Escape>', lambda e: self.controller.on_escape(e))
         self.root.protocol("WM_DELETE_WINDOW", self.on_exit)
+        
+        # Bind Ctrl+A only to canvas (not globally) so text widgets can handle it
+        self.canvas.bind('<Control-a>', lambda e: self.controller.select_all())
+        
+        # Explicitly bind Ctrl+A for Entry and Text widgets to select all text
+        # Bind for both tk.Entry and ttk.Entry (class names: Entry and TEntry)
+        self.root.bind_class("Entry", "<Control-a>", self._select_all_text)
+        self.root.bind_class("TEntry", "<Control-a>", self._select_all_text)
+        self.root.bind_class("Text", "<Control-a>", self._select_all_text)
+        
+        # Also bind for Combobox entry field
+        self.root.bind_class("TCombobox", "<Control-a>", self._select_all_text)
+    
+    def _select_all_text(self, event):
+        """Select all text in Entry or Text widget."""
+        widget = event.widget
+        try:
+            if isinstance(widget, tk.Text):
+                widget.tag_add("sel", "1.0", "end-1c")
+                widget.mark_set("insert", "end-1c")
+                return "break"
+            elif isinstance(widget, (tk.Entry, ttk.Entry, ttk.Combobox)):
+                widget.select_range(0, tk.END)
+                widget.icursor(tk.END)
+                return "break"
+        except:
+            pass
 
     def update_ui_state(self):
         can_undo = self.controller.can_undo()

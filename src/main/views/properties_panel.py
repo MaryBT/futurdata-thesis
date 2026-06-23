@@ -32,18 +32,6 @@ class PropertiesPanel(ttk.Frame):
         title = ttk.Label(self, text="Properties", font=("Arial", 12, "bold"))
         title.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
 
-        # Shape ID (read-only)
-        ttk.Label(self, text="Shape ID:").grid(row=1, column=0, sticky="w", pady=2)
-        self.id_label = ttk.Label(self, text="-", foreground="blue", font=("Arial", 9, "bold"))
-        self.id_label.grid(row=1, column=1, sticky="w", pady=2)
-
-        # Shape Type (read-only)
-        ttk.Label(self, text="Type:").grid(row=2, column=0, sticky="w", pady=2)
-        self.type_label = ttk.Label(self, text="-", foreground="gray")
-        self.type_label.grid(row=2, column=1, sticky="w", pady=2)
-
-        ttk.Separator(self, orient="horizontal").grid(row=3, column=0, columnspan=2, sticky="ew", pady=10)
-
         # Dynamic properties frame - will be populated based on shape type
         self.properties_frame = ttk.LabelFrame(self, text="Properties", padding=5)
 
@@ -121,6 +109,18 @@ class PropertiesPanel(ttk.Frame):
             elif materials:
                 widget.set("")  # Empty by default
 
+        elif widget_type == 'dropdown' and field_name == 'tool_id':
+            tools = self.db.get_all_tools()
+            tool_names = [t['name'] for t in tools]
+            widget = ttk.Combobox(parent, values=tool_names, width=22, state="readonly")
+            widget.grid(row=row, column=1, sticky="ew", pady=3)
+            widget.tool_map = {t['name']: t['id'] for t in tools}
+            widget.tool_map_reverse = {t['id']: t['name'] for t in tools}
+            if value and value in widget.tool_map_reverse:
+                widget.set(widget.tool_map_reverse[value])
+            elif tools:
+                widget.set("")
+
         elif field_name == 'node_type':
             # Read-only label for node type
             widget = ttk.Label(parent, text=str(value) if value else "Intermediate", font=("Arial", 9, "italic"))
@@ -173,6 +173,8 @@ class PropertiesPanel(ttk.Frame):
         """Get value from a widget regardless of type."""
         if isinstance(widget, ttk.Checkbutton):
             return widget.var.get()
+        elif isinstance(widget, ttk.Label):
+            return widget.cget("text")
         elif isinstance(widget, tk.Text):
             return widget.get("1.0", "end-1c")
         elif isinstance(widget, ttk.Combobox):
@@ -183,6 +185,9 @@ class PropertiesPanel(ttk.Frame):
             # Handle material dropdown - return material_id
             if hasattr(widget, 'material_map') and value in widget.material_map:
                 return widget.material_map[value]
+            # Handle tool dropdown - return tool_id
+            if hasattr(widget, 'tool_map') and value in widget.tool_map:
+                return widget.tool_map[value]
             return value
         elif isinstance(widget, ttk.Entry):
             return widget.get()
@@ -191,6 +196,14 @@ class PropertiesPanel(ttk.Frame):
     def _load_component_properties(self, shape: ComponentBox):
         """Load component properties dynamically from database schema."""
         self._clear_dynamic_fields()
+
+        db_id = shape.properties.get("db_id")
+        if db_id:
+            db_row = self.db.get_component(int(db_id))
+            if db_row:
+                for key, value in db_row.items():
+                    if key in shape.properties:
+                        shape.properties[key] = value
 
         node_type = str(shape.properties.get('node_type', '')).strip().lower()
         if node_type == "root":
@@ -221,9 +234,20 @@ class PropertiesPanel(ttk.Frame):
 
         shape_values = {
             'name': shape.name,
-            'description': '',
-            'tools': shape.tools
+            'description': shape.description,
+            'tool_id': shape.tool_id
         }
+
+        action_db_id = getattr(shape, "db_action_id", None)
+        if action_db_id:
+            db_row = self.db.get_action(int(action_db_id))
+            if db_row:
+                shape_values.update(db_row)
+                shape.name = db_row.get('name', shape.name)
+                shape.description = db_row.get('description', shape.description)
+                shape.tool_id = db_row.get('tool_id', shape.tool_id)
+                shape.tools = db_row.get('tool_name', shape.tools)
+                shape.text = shape.name or shape.text
 
         for row, field in enumerate(fields):
             field_name = field['name']
@@ -238,17 +262,29 @@ class PropertiesPanel(ttk.Frame):
         fields = self.db.get_step_fields()
 
         shape_values = {
-            'step_order': 1,
+            'title': shape.text,
             'description': shape.step_description,
-            'tools': shape.tools,
             'image_path': shape.image_path
         }
 
-        for row, field in enumerate(fields):
+        step_db_id = getattr(shape, "db_step_id", None)
+        if step_db_id:
+            db_row = self.db.get_step(int(step_db_id))
+            if db_row:
+                shape_values.update(db_row)
+                shape.step_description = db_row.get('description', shape.step_description)
+                shape.text = db_row.get('title', shape.text) or shape.text
+                shape.image_path = db_row.get('image_path', shape.image_path)
+
+        row_num = 0
+
+        # Add editable fields
+        for field in fields:
             field_name = field['name']
             value = shape_values.get(field_name, "")
-            widget = self._create_field_widget(self.properties_frame, field, row, value)
+            widget = self._create_field_widget(self.properties_frame, field, row_num, value)
             self.dynamic_fields[field_name] = widget
+            row_num += 1
 
     def load_shape(self, shape: Optional[Shape]):
         """Load shape properties into the panel."""
@@ -256,15 +292,9 @@ class PropertiesPanel(ttk.Frame):
 
         if shape is None:
             self._show_empty_state()
-            self.id_label.config(text="-")
-            self.type_label.config(text="-")
             return
 
         self.empty_label.grid_remove()
-
-        # Show shape ID and type
-        self.id_label.config(text=f"#{shape.id}")
-        self.type_label.config(text=shape.shape_type.capitalize())
 
         # Show properties frame
         self.properties_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=5)
@@ -306,14 +336,16 @@ class PropertiesPanel(ttk.Frame):
 
         if isinstance(self.current_shape, ActionCircle):
             properties.update({
+                "title": self.current_shape.text,
                 "step_description": self.current_shape.step_description,
-                "tools": self.current_shape.tools,
                 "image_path": self.current_shape.image_path
             })
         elif isinstance(self.current_shape, DiamondStep):
             properties.update({
                 "action_id": self.current_shape.action_id,
                 "name": self.current_shape.name,
+                "description": self.current_shape.description,
+                "tool_id": self.current_shape.tool_id,
                 "tools": self.current_shape.tools
             })
         elif isinstance(self.current_shape, ComponentBox):
@@ -337,11 +369,10 @@ class PropertiesPanel(ttk.Frame):
                 self.current_shape.text = self.current_shape.properties['name']
 
         elif isinstance(self.current_shape, ActionCircle):
+            if 'title' in self.dynamic_fields:
+                self.current_shape.text = self._get_widget_value(self.dynamic_fields['title'])
             if 'description' in self.dynamic_fields:
                 self.current_shape.step_description = self._get_widget_value(self.dynamic_fields['description'])
-                self.current_shape.text = self.current_shape.step_description
-            if 'tools' in self.dynamic_fields:
-                self.current_shape.tools = self._get_widget_value(self.dynamic_fields['tools'])
             if 'image_path' in self.dynamic_fields:
                 self.current_shape.image_path = self._get_widget_value(self.dynamic_fields['image_path'])
 
@@ -349,8 +380,13 @@ class PropertiesPanel(ttk.Frame):
             if 'name' in self.dynamic_fields:
                 self.current_shape.name = self._get_widget_value(self.dynamic_fields['name'])
                 self.current_shape.text = self.current_shape.name
-            if 'tools' in self.dynamic_fields:
-                self.current_shape.tools = self._get_widget_value(self.dynamic_fields['tools'])
+            if 'description' in self.dynamic_fields:
+                self.current_shape.description = self._get_widget_value(self.dynamic_fields['description'])
+            if 'tool_id' in self.dynamic_fields:
+                self.current_shape.tool_id = self._get_widget_value(self.dynamic_fields['tool_id'])
+                tool_widget = self.dynamic_fields['tool_id']
+                if hasattr(tool_widget, 'tool_map_reverse') and self.current_shape.tool_id in tool_widget.tool_map_reverse:
+                    self.current_shape.tools = tool_widget.tool_map_reverse[self.current_shape.tool_id]
 
     def refresh(self):
         """Reload the properties for the current shape to reflect DB changes."""

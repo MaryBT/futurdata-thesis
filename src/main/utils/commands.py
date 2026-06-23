@@ -162,7 +162,9 @@ class EditShapePropertiesCommand(Command):
 
     def _apply_properties(self, properties):
         for key, value in properties.items():
-            if hasattr(self.shape, key):
+            if hasattr(self.shape, "properties") and key in getattr(self.shape, "properties", {}):
+                self.shape.properties[key] = value
+            elif hasattr(self.shape, key):
                 setattr(self.shape, key, value)
 
     def get_description(self) -> str:
