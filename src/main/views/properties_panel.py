@@ -311,9 +311,10 @@ class PropertiesPanel(ttk.Frame):
             self.properties_frame.config(text="Action Properties")
             self._load_action_properties(shape)
         else:
-            # Arrow or unknown type - show minimal properties
+            # Arrow or unknown type - no editable properties, so hide Apply button
             self._clear_dynamic_fields()
             self.properties_frame.config(text="Properties")
+            self.apply_button.grid_remove()
 
     def _on_apply(self):
         """Apply changes to the shape."""
