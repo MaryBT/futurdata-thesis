@@ -17,6 +17,7 @@ class PropertiesPanel(ttk.Frame):
     """
 
     def __init__(self, parent, on_apply_callback: Optional[Callable] = None):
+        """Initialize the properties panel and build its widgets."""
         super().__init__(parent, padding=10)
         self.on_apply_callback = on_apply_callback
         self.current_shape: Optional[Shape] = None
@@ -28,6 +29,7 @@ class PropertiesPanel(ttk.Frame):
         self._create_widgets()
 
     def _create_widgets(self):
+        """Create the title, properties frame, apply button and empty label."""
         # Title
         title = ttk.Label(self, text="Properties", font=("Arial", 12, "bold"))
         title.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
