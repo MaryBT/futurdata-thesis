@@ -767,9 +767,28 @@ class AppController:
             component_id = self._ensure_component_db_id(shape)
             updates = dict(shape.properties)
             updates.pop("db_id", None)
-            self.db.update_component(int(component_id), **updates)
+
+            safe_updates = {k: v for k, v in updates.items() if not (k == 'root_component_id' and (v is None or str(v).strip() in ('', 'None')))}
+            self.db.update_component(int(component_id), **safe_updates)
             shape.properties["db_id"] = int(component_id)
-            return
+            
+        if 'root_component_id' in updates:
+            val = updates['root_component_id']
+            node_type = shape.properties.get('node_type', '')
+            
+            if node_type == 'Root':
+                updates['root_component_id'] = ""
+            else:
+                # For Leaf or Composite nodes, if the value comes as None or "None",
+                # try to salvage the actual ID stored in the object's memory.
+                if val is None or str(val).strip() in ('', 'None'):
+                    real_id = shape.properties.get('root_component_id')
+                    if real_id and str(real_id).strip() not in ('', 'None'):
+                        updates['root_component_id'] = int(real_id)
+                    else:
+                        # If there is absolutely no real ID, send "" so the DB
+                        # triggers its 'else None' and avoids throwing a TypeError
+                        updates['root_component_id'] = ""
 
         if isinstance(shape, ActionCircle):
             try:
@@ -830,16 +849,32 @@ class AppController:
         self.view.set_status(f"Snap to grid: {'on' if self.diagram.snap_to_grid else 'off'}")
 
     def zoom_in(self):
-        """Zoom in (not yet implemented)."""
-        self.view.set_status("Zoom in (not yet implemented)")
+        """
+        Event handler triggered by the 'Zoom In' action shortcut.
+        Instructs the view canvas component to perform the upscale algorithm 
+        and updates the status bar message with the live zoom percentage.
+        """
+        
+        self.view.canvas.zoom_in()
+        self.view.set_status(f"Zoom: {int(self.view.canvas.zoom_factor * 100)}%")
 
     def zoom_out(self):
-        """Zoom out (not yet implemented)."""
-        self.view.set_status("Zoom out (not yet implemented)")
+        """
+        Event handler triggered by the 'Zoom Out' action shortcut.
+        Instructs the view canvas component to perform the downscale algorithm 
+        and updates the status bar message with the live zoom percentage.
+        """
+        self.view.canvas.zoom_out()
+        self.view.set_status(f"Zoom: {int(self.view.canvas.zoom_factor * 100)}%")
 
     def reset_zoom(self):
-        """Reset zoom (not yet implemented)."""
-        self.view.set_status("Reset zoom (not yet implemented)")
+        """
+        Event handler triggered to restore default sizing.
+        Resets the canvas view back to 100% scale and updates the status bar text.
+        """
+        self.view.canvas.reset_zoom()
+        self.view.set_status("Zoom: 100%")
+
 
     def new_diagram(self):
         """Create a new diagram. Existing database entries are preserved."""
