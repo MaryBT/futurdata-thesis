@@ -10,7 +10,7 @@ from ..views.add_material_dialog import AddMaterialDialog
 from ..views.add_tool_dialog import AddToolDialog
 from ..utils import (
     CommandHistory, AddShapeCommand, RemoveShapeCommand, MoveShapeCommand,
-    AddConnectionCommand, EditShapePropertiesCommand, snap_to_grid,
+    AddConnectionCommand, EditShapePropertiesCommand, MultiCommand, snap_to_grid,
     find_alignment_guides, DiagramSerializer
 )
 from ..utils.diagram_loader import DiagramLoader
@@ -538,31 +538,26 @@ class AppController:
         self.view.set_status(f"Duplicated {shape.shape_type}")
 
     def _delete_shape(self, shape):
-        """Delete a single shape if it is not connected."""
-        if self._is_shape_connected(shape):
-            self.view.set_status("Cannot delete: shape is connected. Remove arrows/connections first.")
-            return
-
+        """Delete a shape, removing any arrows/connections attached to it."""
         if not self._delete_shape_from_db(shape):
             return
 
-        command = RemoveShapeCommand(self.diagram, shape)
-        self.command_history.execute(command)
+        commands = [RemoveShapeCommand(self.diagram, arrow)
+                    for arrow in self._get_attached_arrows(shape)]
+        commands.append(RemoveShapeCommand(self.diagram, shape))
+        if len(commands) == 1:
+            self.command_history.execute(commands[0])
+        else:
+            self.command_history.execute(MultiCommand(commands, f"Remove {shape.shape_type}"))
         self._update_view()
         self.view.set_status(f"Deleted {shape.shape_type}")
 
-    def _is_shape_connected(self, shape) -> bool:
-        """Return True if shape is linked via connection lines or arrow shapes."""
+    def _get_attached_arrows(self, shape) -> list:
+        """Return the arrow shapes whose endpoints reference the given shape."""
         if isinstance(shape, ArrowShape):
-            return False
-
-        if self.diagram.get_connections_for_shape(shape):
-            return True
-
-        for s in self.diagram.shapes:
-            if isinstance(s, ArrowShape) and (s.from_shape == shape or s.to_shape == shape):
-                return True
-        return False
+            return []
+        return [s for s in self.diagram.shapes
+                if isinstance(s, ArrowShape) and (s.from_shape == shape or s.to_shape == shape)]
 
     def _delete_shape_from_db(self, shape) -> bool:
         """Delete corresponding DB entity for a shape if it exists.
@@ -687,7 +682,7 @@ class AppController:
             raise ValueError(f"Unknown shape type: {shape_type}")
 
     def delete_selected(self):
-        """Delete all currently selected (unconnected) shapes."""
+        """Delete all currently selected shapes along with their arrows/connections."""
         if not self.diagram.selected_shapes:
             self.view.set_status("No shapes selected")
             return
@@ -699,18 +694,23 @@ class AppController:
             self.connecting_from = None
 
         selected = list(self.diagram.selected_shapes)
-        blocked = [shape for shape in selected if self._is_shape_connected(shape)]
-        if blocked:
-            self.view.set_status("Cannot delete connected shape(s). Remove arrows/connections first.")
-            return
 
         for shape in selected:
             if not self._delete_shape_from_db(shape):
                 return
 
+        to_delete = []
         for shape in selected:
-            command = RemoveShapeCommand(self.diagram, shape)
-            self.command_history.execute(command)
+            for arrow in self._get_attached_arrows(shape):
+                if arrow not in to_delete and arrow not in selected:
+                    to_delete.append(arrow)
+        to_delete.extend(selected)
+
+        commands = [RemoveShapeCommand(self.diagram, shape) for shape in to_delete]
+        if len(commands) == 1:
+            self.command_history.execute(commands[0])
+        else:
+            self.command_history.execute(MultiCommand(commands, "Remove selected shapes"))
 
         self._update_view()
         self.view.set_status("Deleted selected shapes")
@@ -854,6 +854,7 @@ class AppController:
         self.view.set_status("New diagram created (Database preserved - use 'Load Product' to see saved diagrams)")
 
     def open_diagram(self):
+        """Load a diagram from a JSON file chosen by the user."""
         if not self.check_unsaved_changes():
             return
 
@@ -917,6 +918,10 @@ class AppController:
     def clear_canvas(self):
         """Remove all shapes from the canvas after confirmation."""
         if not self.diagram.shapes:
+            # Even with an empty canvas the command history may still hold
+            # undoable commands (e.g. deletions), so reset it anyway.
+            self.command_history.clear()
+            self._update_view()
             self.view.set_status("Canvas is already empty")
             return
 
