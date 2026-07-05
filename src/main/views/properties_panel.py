@@ -133,7 +133,7 @@ class PropertiesPanel(ttk.Frame):
             widget.grid(row=row, column=1, sticky="ew", pady=3)
 
         elif field_name == 'image_path':
-            # Remplacement par un champ d'entrée de texte classique
+            # Plain text field for image path entry
             widget = ttk.Entry(parent, width=25)
             widget.grid(row=row, column=1, sticky="ew", pady=3)
             widget.insert(0, str(value) if value else "")
