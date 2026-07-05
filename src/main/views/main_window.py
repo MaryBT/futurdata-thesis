@@ -351,7 +351,7 @@ class MainWindow:
             title (str): The header string context title of the popup window.
             message (str): Explicit error summary log description.
         """
-        messagebox.showerror(title, message)
+        self.status_label.config(text=f"Error [{title}]: {message}", foreground="red")
 
     def show_info(self, title: str, message: str):
         """
@@ -361,7 +361,7 @@ class MainWindow:
             title (str): The header string context title of the popup window.
             message (str): Core notice text description details.
         """
-        messagebox.showinfo(title, message)
+        self.status_label.config(text=f"Info: {message}", foreground="black")
     
     def update_snap_button(self, snap_enabled: bool):
         if snap_enabled:
