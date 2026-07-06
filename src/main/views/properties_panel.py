@@ -132,6 +132,12 @@ class PropertiesPanel(ttk.Frame):
             widget = ttk.Label(parent, text=str(value) if value else "Intermediate", font=("Arial", 9, "italic"))
             widget.grid(row=row, column=1, sticky="ew", pady=3)
 
+        elif field_name == 'image_path':
+            # Plain text field for image path entry
+            widget = ttk.Entry(parent, width=25)
+            widget.grid(row=row, column=1, sticky="ew", pady=3)
+            widget.insert(0, str(value) if value else "")
+
         # Create appropriate widget based on type
         elif field_type == 'BOOLEAN':
             # Checkbox for boolean
